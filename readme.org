@@ -1,0 +1,288 @@
+* blocks, Proc, lambda
+
+** about
+Блоки - одна из ключевых конструкции в ruby. Грамотное использование блоки позволяет писать выразительный и читаемый код.
+Разберём как работают блоки, в чем разница proc и lambda, и что такое "замыкание".
+Ожидаю что к этому курсу слушатель уже знаком с итераторами и функциями
+
+** Блоки, Proc, lambda
+*** 1. Блоки
+
+Использование блоков начинается с первых минут знакомства с языком
+
+#+BEGIN_SRC ruby :results output
+3.times { puts 'Hello, World' }
+#+END_SRC
+
+#+RESULTS:
+: Hello, World
+: Hello, World
+: Hello, World
+
+Блок это произвольная последовательность кода которую можно передать в метод в качестве неявного аргумента
+Блок задаётся в с помощью фигурных скобок `{...}` либо конструкции `do...end`
+
+#+BEGIN_SRC ruby :results output
+3.times do
+  puts 'Hello, World'
+end
+#+END_SRC
+
+Попробуем сделать свой метод `test` котрый будет выполнять блок.
+Определим метод и в месте где мы хотим что бы выполнился блок напишем оператор yield
+И вызовем метод `test` с блоком
+
+#+BEGIN_SRC ruby :results output
+def test
+   puts '### before block'
+   yield
+   puts '### after block'
+end
+
+test { puts 'Hello world' }
+#+END_SRC
+
+#+RESULTS:
+: ### before block
+: Hello world
+: ### after block
+
+Позже мы разберёмся подробнее с оператором `yield`, а сейчас изучим природу блока.
+Для этого рассмотрим ещё один способ передачи блока котрый нам позволит записать блок в перменную.
+Из описания блока понятно что его можно передать в любой метод как "специальный аргумент".
+В определении метода "специальный аргумент" обозачается `&`, такой аргумент должен стояить последним в списке аргументов и он может быть только один
+Определим метод `test` который будет принимать блок.
+
+#+BEGIN_SRC ruby :results output
+def test(&block)
+   puts '### before block'
+   puts block
+   puts '### after block'
+end
+
+test { puts 'Hello World' }
+#+END_SRC
+
+#+RESULTS:
+: ### before block
+: #<Proc:0x0000000151b228@-:7>
+: ### after block
+
+Видим что в переменной `block` оказался объект класса `Proc`.
+Посмотрев документацию на класс `Proc` можно увидеть что есть несколько способов выполнить код
+Воспользуемся самым очевидным вызовем у переменной `block` метод `call` и получим результат как в примере с `yield`
+
+#+BEGIN_SRC ruby :results output
+def test(&block)
+   puts '### before block'
+   block.call
+   puts '### after block'
+end
+
+test { puts 'Hello World' }
+#+END_SRC
+
+#+RESULTS:
+: ### before block
+: Hello World
+: ### after block
+
+На практике второй метод кроме изучения объекта позволяет что либо более практичное, например сохранить блоки в массив для отложенного выполнения
+Сделаем класс который будет принимать наши блоки и потом по команде `answer` выполнит их все
+
+#+BEGIN_SRC ruby :results output
+class LazyEcho
+   attr_reader :blocks
+
+   def initialize
+     @blocks = []
+   end
+
+   def say(&block)
+     blocks.push block
+   end
+
+   def answer
+     blocks.each {|block| block.call}
+   end
+end
+
+echo = LazyEcho.new
+echo.say { puts "Hello" }
+echo.say { puts "Hello again" }
+puts "Waiting for..."
+echo.answer
+#+END_SRC
+
+#+RESULTS:
+: Waiting for...
+: Hello
+: Hello again
+
+В классе через `attr_reader` я определяю метод который будет возвращать значение переменной объекта `@blocks`
+
+*** 2. Блоки и замыкания
+Теперь когда мы знаем что блок это просто инстанс класса `Proc` можем просто создать блок
+
+Можно передавать Proc объект вместо блока
+
+#+BEGIN_SRC ruby :results output
+block = Proc.new { puts "Hello World" }
+2.times &block
+#+END_SRC
+
+#+RESULTS:
+: Hello World
+: Hello World
+
+Блок может получать значение переменных определённых до него
+#+BEGIN_SRC ruby :results output
+  name = 'John'
+  hello_proc = Proc.new { puts "Hello #{name}" }
+  hello_proc.call
+#+END_SRC
+
+#+RESULTS:
+: Hello John
+
+Тут надо заметить что я определил переменную вне блока, но она была использована при выполнении блока.
+Это и есть так называемое замыкание, когда функция при определеннии запоминает все ссылки на определённые "рядом" переменные.
+Когда я говорю "рядом" я имею ввиду находятся в области видимости.
+
+Посмотрим на практике что значит запоминает ссылки
+Сделаем метод генерирующий нам приветствия для разных людей
+
+#+BEGIN_SRC ruby :results output
+  def build_hello_proc(name)
+    Proc.new { puts "Hello #{name}" }
+  end
+  greetings = [build_hello_proc('John'), build_hello_proc('Sam')]
+  greetings.map &:call
+#+END_SRC
+
+#+RESULTS:
+: Hello John
+: Hello Sam
+
+Тут видно что несмотря на то что переменная `name` существовала только в методе `build_hello_proc`
+при выполнении использовалась нужное значение `name`.
+Тут стоит обратить внимание на что запоминается именно ссылка
+
+#+BEGIN_SRC ruby :results output
+  def build_hello_proc(user)
+    Proc.new { puts "Hello #{user[:name]}" }
+  end
+  greetings = []
+
+  user = {name: 'John'}
+  greetings.push build_hello_proc(user)
+  user[:name] = 'Sam'
+  greetings.push build_hello_proc(user)
+  greetings.map &:call
+#+END_SRC
+
+#+RESULTS:
+: Hello Sam
+: Hello Sam
+
+Удобства замыкания несут в себе некоторю опастность.
+Дело в том что связь блока с переменной двусторонняя.
+Т.е изменив переменную внутри блока можно поменять значение снаружи
+
+#+BEGIN_SRC ruby :results output
+def test
+   yield
+end
+
+name = 'John'
+
+test do
+  name = 'Sam';
+  puts "Hello #{name}"
+end
+
+puts name
+#+END_SRC
+
+#+RESULTS:
+: Hello Sam
+: Sam
+
+Что бы избежать переопеделения конкретной внешней переменной нужно
+указать её как аргумент блока, но после `;`
+
+#+BEGIN_SRC ruby :results output
+def test
+   yield
+end
+
+name = 'John'
+
+test do |;name|
+  name = 'Sam';
+  puts "Hello #{name}"
+end
+
+puts name
+#+END_SRC
+
+#+RESULTS:
+: Hello Sam
+: John
+
+*** 3. Proc vs lambda
+    У Proc существует разновидность `lambda`.
+    `lambda` больше похожа на метод, это влияет на строгость к наличию аргументов и способу обработки ключевого слова `return`
+
+    если не передать нужно количество аргументов в `lambda` тогда будет ошибка
+
+#+BEGIN_SRC ruby :results output
+block = lambda {|name| puts "Hello #{name}"}
+block.call('John')
+block.call
+#+END_SRC
+
+#+RESULTS:
+wrong number of arguments (given 0, expected 1) (ArgumentError)
+
+    если в Proc не передать ожидаемых аргументов, то значение перменной будет по умолчанию `nil`
+#+BEGIN_SRC ruby :results output
+block = Proc.new {|name| puts "Hello #{name}"}
+block.call('John')
+block.call
+#+END_SRC
+
+#+RESULTS:
+: Hello John
+: Hello
+
+*** 4. Другие способы задания и вызова блоков
+    Для определения и вызова `Proc` и `lambda` существует более короткая запись
+    Вместо имени класса можно использовать ключевое слово `proc`, а вместо вызова можно использовать `[]`
+
+    #+BEGIN_SRC ruby :results output
+    block = Proc.new { puts 'Hello world' }
+    block.call
+
+    block = proc { puts 'Hello world' }
+    block[]
+    #+END_SRC
+
+    #+RESULTS:
+    : Hello world
+    : Hello world
+
+
+    Oпределение lambda может быть заменено на `->`, аргумент блока нужно указывать в скобках
+
+    #+BEGIN_SRC ruby :results output
+    block = lambda {|name| puts "Hello #{name}" }
+    block.call('John')
+
+    block = ->(name) { puts "Hello #{name}" }
+    block['John']
+    #+END_SRC
+
+    #+RESULTS:
+    : Hello John
+    : Hello John
